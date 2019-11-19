@@ -1,0 +1,48 @@
+version: '3.3'
+
+services:
+  {{blogid}}_db:
+    image: mysql:5.7
+    restart: always
+    volumes:
+      - {{website_dir}}/{{blogid}}/mysql_data:/var/lib/mysql
+    ports:
+      - "{{sqlport}}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: {{database_password_2}}
+      MYSQL_DATABASE: {{blogid}}
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: {{database_password}}
+      DB_CONTAINER_NAME: {{blogid}}_db
+
+  {{blogid}}_wordpress:
+    depends_on:
+      - {{blogid}}_db
+    image: wordpress:latest
+    volumes:
+      - {{website_dir}}/{{blogid}}/wordpress:/var/www/html
+    ports:
+      - "{{blogport}}:80"
+    restart: always
+    environment:
+      WORDPRESS_DB_HOST: {{blogid}}_db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: {{database_password}}
+      WORDPRESS_DB_NAME: {{blogid}}
+      WORDPRESS_CONFIG_EXTRA: "define('WP_HOME','https://{{blogdomain}}'); define('WP_SITEURL','https://{{blogdomain}}');"
+      VIRTUAL_HOST: {{blogdomain}}
+
+  {{blogid}}_backupdb:
+    image: selim13/automysqlbackup:latest
+    volumes:
+      - {{website_dir}}/{{blogid}}/backups:/backup
+    restart: always
+    environment:
+      CRON_SCHEDULE: "0 0 * * *"
+      DBHOST: {{blogid}}_db
+      USERNAME: root
+      PASSWORD: {{database_password_2}}
+      DBNAMES: all
+      DB_CONTAINER_NAME: {{blogid}}_db
+    depends_on:
+      - {{blogid}}_db

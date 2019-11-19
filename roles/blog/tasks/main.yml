@@ -1,0 +1,75 @@
+---
+- name: Install packages
+  apt: name={{ item }}
+  with_items:
+    - python3-pip
+    - python3-acme
+    - python3-certbot
+    - python3-mock
+    - python3-openssl
+    - python3-pkg-resources
+    - python3-pyparsing
+    - python3-zope.interface
+    - python3-certbot-nginx
+
+- name: create the docker project directory
+  file: path={{website_dir}}/{{blogid}} owner=www-data mode=0777 state=directory
+
+- name: create the data directories
+  file: path={{website_dir}}/{{blogid}}/{{item}} owner=www-data mode=0777 state=directory
+  with_items:
+    - docker
+    - backups
+    - mysql_data
+    - wordpress
+
+- name: copy docker project file
+  template: src={{item}} dest={{website_dir}}/{{blogid}}/docker/{{item}}  mode=0400 owner=www-data
+  with_items:
+    - docker-compose.yml
+
+- name: launch docker compose
+  shell: "docker-compose up -d"
+  args:
+    chdir: '{{website_dir}}/{{blogid}}/docker'
+
+- name: add cron job to start blog on reboot
+  cron:
+    name: "start {{blogid}} on reboot"
+    special_time: reboot
+    job: "/usr/local/bin/docker-compose -f {{website_dir}}/{{blogid}}/docker/docker-compose.yml up -d"
+
+- name: allow Nginx through the firewall
+  ufw: rule=allow name='Nginx Full'
+
+- name: check if certs already present
+  stat:
+    path: "/etc/letsencrypt/live/{{blogdomain}}/cert.pem"
+  register: stat_result
+
+# if you are skipping cert generation, this must also be skipped (see 'when' below)
+- name: add nginx conf
+  template: src=blog.conf dest=/etc/nginx/sites-available/{{blogdomain}}.conf mode=0644
+  when: stat_result.stat.exists == False
+  notify: Reload nginx
+
+# remove existing defaults
+- name: Disable default site
+  file: dest=/etc/nginx/sites-enabled/default state=absent
+  notify: Reload nginx
+
+- name: Enable configuration
+  file: src=/etc/nginx/sites-available/{{blogdomain}}.conf dest=/etc/nginx/sites-enabled/{{blogdomain}}.conf state=link
+  notify: Reload nginx
+
+# this does everything:
+# * generate the certs
+# * write the configuration onto your site's nginx config file
+# * add the auto-renew in /etc/systemd/system/timers.target.wants/certbot.timer
+# Do not call this more than 50 times quickly in a row or you will be sorry!
+- name: generate certificate with certbot
+  shell: "certbot --nginx --noninteractive --agree-tos --email {{ certbot_admin_email }} --redirect -d {{blogdomain}}"
+  when: stat_result.stat.exists == False
+
+# Make sure nginx is reloaded now (if necessary)
+- meta: flush_handlers
